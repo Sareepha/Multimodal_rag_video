@@ -9,7 +9,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 LANCEDB_HOST_FILE = "./shared_data/lancedb"
 TBL_NAME = "test_tbl"
-API_BASE = "http://192.168.10.234:11434"
+API_BASE = "your-api-base"
 MODEL_NAME = "llama3.2:latest"
 
 api_cache = {}
