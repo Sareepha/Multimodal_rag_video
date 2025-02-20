@@ -1,100 +1,62 @@
+from yt_dlp import YoutubeDL
 import base64
 import cv2
 import dataclasses
 import glob
 import json
-import logging
 import os
+import PIL
 import random
 import requests
 import textwrap
 import time
 from datasets import load_dataset
 from dotenv import load_dotenv, find_dotenv
-from enum import Enum, auto
+from enum import auto, Enum
 from io import StringIO, BytesIO
 from langchain_core.messages import MessageLikeRepresentation
 from langchain_core.prompt_values import PromptValue
-from pathlib import Path
 from PIL import Image
 from predictionguard import PredictionGuard
 from pytubefix import YouTube, Stream
 from tqdm import tqdm
-from typing import (
-    Iterator,
-    TextIO,
-    List,
-    Dict,
-    Any,
-    Optional,
-    Sequence,
-    Union
-)
+from typing import Iterator, TextIO, List, Dict, Any, Optional, Sequence, Union
 from urllib.request import urlopen
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import WebVTTFormatter
 import numpy as np
+MultimodalModelInput = Union[PromptValue, str, Sequence[MessageLikeRepresentation], Dict[str, Any]]
+import logging
+from pathlib import Path
+from typing import Optional
 import dspy
 import lancedb
-import torch
+from io import BytesIO
 from transformers import CLIPProcessor, CLIPModel
-from functools import lru_cache
-import lancedb
-from yt_dlp import YoutubeDL
-
-MultimodalModelInput = Union[PromptValue, str, Sequence[MessageLikeRepresentation], Dict[str, Any]]
+import torch
 
 
 LANCEDB_HOST_FILE = "./shared_data/lancedb"
 
-# def get_latest_batch_data():
-#     """ดึง batch_id และ video_path ล่าสุดจาก LanceDB"""
-#     db = lancedb.connect(LANCEDB_HOST_FILE)
-#     table = db.open_table("test_tbl")
-#     records = table.to_pandas().to_dict('records')
-
-#     latest_batch_id = None
-#     latest_video_path = None
-#     if records:
-#         latest_batch_id = max(record['metadata']['batch_id'] for record in records if 'batch_id' in record['metadata'])
-#         for record in records:
-#             if record['metadata'].get('batch_id') == latest_batch_id:
-#                 latest_video_path = record['metadata']['video_path']
-#                 break
-
-#     if not latest_batch_id or not latest_video_path:
-#         raise ValueError("No valid batch_id or video_path found in the database.")
-
-#     return latest_batch_id, latest_video_path
-
-
-
-@lru_cache(maxsize=1)
 def get_latest_batch_data():
-    """ดึง batch_id และ video_path ล่าสุดจาก LanceDB โดยใช้ lru_cache"""
+    """ดึง batch_id และ video_path ล่าสุดจาก LanceDB"""
     db = lancedb.connect(LANCEDB_HOST_FILE)
     table = db.open_table("test_tbl")
     records = table.to_pandas().to_dict('records')
 
-    if not records:
-        raise ValueError("⚠️ No records found in the database.")
-
-    latest_batch_id = max(
-        record['metadata']['batch_id'] 
-        for record in records if 'batch_id' in record['metadata']
-    )
-    latest_video_path = next(
-        (record['metadata'].get('video_path') 
-         for record in records if record['metadata'].get('batch_id') == latest_batch_id), 
-        None
-    )
+    latest_batch_id = None
+    latest_video_path = None
+    if records:
+        latest_batch_id = max(record['metadata']['batch_id'] for record in records if 'batch_id' in record['metadata'])
+        for record in records:
+            if record['metadata'].get('batch_id') == latest_batch_id:
+                latest_video_path = record['metadata']['video_path']
+                break
 
     if not latest_batch_id or not latest_video_path:
-        raise ValueError("⚠️ No valid batch_id or video_path found in the database.")
+        raise ValueError("No valid batch_id or video_path found in the database.")
 
-    print(f"✅ ดึง batch_id ใหม่: {latest_batch_id}")
     return latest_batch_id, latest_video_path
-
 
 
 def get_from_dict_or_env(
@@ -130,7 +92,6 @@ def get_prediction_guard_api_key():
 
 PREDICTION_GUARD_URL_ENDPOINT = 'https://api.predictionguard.com'
 
-# prompt templates
 templates = [
     'a picture of {}',
     'an image of {}',
@@ -138,13 +99,9 @@ templates = [
     'a beautiful {}',
 ]
 
-# function helps to prepare list image-text pairs from the first [test_size] data of a Huggingface dataset
 def prepare_dataset_for_umap_visualization(hf_dataset, class_name, templates=templates, test_size=1000):
-    # load Huggingface dataset (download if needed)
     dataset = load_dataset(hf_dataset, trust_remote_code=True)
-    # split dataset with specific test_size
     train_test_dataset = dataset['train'].train_test_split(test_size=test_size)
-    # get the test dataset
     test_dataset = train_test_dataset['test']
     img_txt_pairs = []
     for i in range(len(test_dataset)):
@@ -210,6 +167,7 @@ def get_video_id_from_url(video_url):
             return url.path.split('/')[2]
     return video_url
 
+# if this has transcript then download
 def get_transcript_vtt(video_url, path='/tmp'):
     video_id = get_video_id_from_url(video_url)
     filepath = os.path.join(path, 'captions.vtt')
@@ -261,31 +219,23 @@ def _processText(text: str, maxLineWidth=None):
     lines = textwrap.wrap(text, width=maxLineWidth, tabsize=4)
     return '\n'.join(lines)
 
-# resizes a image and maintains aspect ratio
+
 def maintain_aspect_ratio_resize(image, width=None, height=None, inter=cv2.INTER_AREA):
-    # grab the image size and initialise dimensions
     dim = None
     (h, w) = image.shape[:2]
 
-    # return original image if no need to resize
     if width is None and height is None:
         return image
-
-    # resize height if width is none
     if width is None:
-        # calculate the ratio of the height and construct the dimensions
+    
         r = height / float(h)
         dim = (int(w * r), height)
-    # resize width if height is none
     else:
-        # calculate the ratio of the width and construct the dimensions
         r = width / float(w)
         dim = (width, int(h * r))
 
-    # return the resized image
     return cv2.resize(image, dim, interpolation=inter)
 
-# helper function to convert transcripts generated by whisper to .vtt file
 def write_vtt(transcript: Iterator[dict], file: TextIO, maxLineWidth=None):
     print("WEBVTT\n", file=file)
     for segment in transcript:
@@ -298,7 +248,6 @@ def write_vtt(transcript: Iterator[dict], file: TextIO, maxLineWidth=None):
             flush=True,
         )
 
-# helper function to convert transcripts generated by whisper to .srt file
 def write_srt(transcript: Iterator[dict], file: TextIO, maxLineWidth=None):
     """
     Write a transcript to a file in SRT format.
@@ -313,8 +262,6 @@ def write_srt(transcript: Iterator[dict], file: TextIO, maxLineWidth=None):
     """
     for i, segment in enumerate(transcript, start=1):
         text = _processText(segment['text'].strip(), maxLineWidth).replace('-->', '->')
-
-        # write srt lines
         print(
             f"{i}\n"
             f"{format_timestamp(segment['start'], always_include_hours=True, fractionalSeperator=',')} --> "
@@ -337,23 +284,18 @@ def getSubs(segments: Iterator[dict], format: str, maxLineWidth: int=-1) -> str:
     segmentStream.seek(0)
     return segmentStream.read()
 
-# encoding image at given path or Pillow (PIL) Image using base64
 def encode_image(image_path_or_PIL_img):
     if isinstance(image_path_or_PIL_img, PIL.Image.Image):
-        # this is a PIL image
         buffered = BytesIO()
         image_path_or_PIL_img.save(buffered, format="JPEG")
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
     else:
-        # this is a image_path
         with open(image_path_or_PIL_img, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
-# checking whether the given string is base64 or not
 def isBase64(sb):
     try:
         if isinstance(sb, str):
-                # If there's any unicode here, an exception will be thrown and the function will return false
                 sb_bytes = bytes(sb, 'ascii')
         elif isinstance(sb, bytes):
                 sb_bytes = sb
@@ -366,16 +308,11 @@ def isBase64(sb):
 
 def encode_image_from_path_or_url(image_path_or_url):
     try:
-        # try to open the url to check valid url
         f = urlopen(image_path_or_url)
-        # if this is an url
         return base64.b64encode(requests.get(image_path_or_url).content).decode('utf-8')
     except:
-        # this is a path to image
         with open(image_path_or_url, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')
-
-
 
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14-336")
 model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14-336")
@@ -665,7 +602,7 @@ def lvlm_inference(prompt, image, max_tokens: int = 200, temperature: float = 0.
 def lvlm_inference_with_conversation(conversation, max_tokens: int = 200, temperature: float = 0.3, top_p: float = 0.9, top_k: int = 50):
     try:
         messages = conversation.get_message()
-        
+        # Generate response by calling lm with messages
         response = lm(
             messages=messages,
             max_tokens=max_tokens,
@@ -674,7 +611,7 @@ def lvlm_inference_with_conversation(conversation, max_tokens: int = 200, temper
             top_k=top_k
         )
         
-    
+        # ตรวจสอบว่า response เป็นลิสต์หรือไม่ 
         if isinstance(response, list):
             logging.warning("Response is a list, combining into a single string.")
             response = " ".join(response) 

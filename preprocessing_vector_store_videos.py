@@ -1,4 +1,3 @@
-
 from utils import (
     download_video, lvlm_inference, encode_image, 
     maintain_aspect_ratio_resize, str2time, getSubs,
@@ -22,11 +21,7 @@ import time
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# lvlm_prompt = "Briefly describe the image in 1-2 sentences, identifying the main object, person, or event that occurred. Use natural language"
-lvlm_prompt = """
-Briefly describe the image in 1-2 sentences. Identify the main object, person, facial expressions, body posture, visible text in the image, and the event occurring. Use natural and concise language.
-"""
-
+lvlm_prompt = "Briefly describe the image in 1-2 sentences, identifying the main object, person, or event that occurred. Use natural language"
 LANCEDB_HOST_FILE = "./shared_data/lancedb"
 TBL_NAME = "test_tbl"
 
@@ -219,8 +214,8 @@ def process_from_gradio(video_url, operation_type):
     try:
         ingest_data_to_lancedb([metadata_path])
     except Exception as e:
-        return f"Error ingesting data into LanceDB: {e}"Multimodal_rag_video
-    
+        return f"Error ingesting data into LanceDB: {e}"
+    # return f"Processing completed successfully! Data is stored under batch ID: {batch_id}"
     return f"Processing completed successfully!"
 
 

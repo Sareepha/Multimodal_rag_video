@@ -21,4 +21,6 @@ seaborn==0.13.2
 datasets==2.20.0
 gradio==4.44.0
 openai-whisper
-#sudo apt-get install libglib2.0-0 libsm6 libxrender1 libxext6
+spacy  
+
+

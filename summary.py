@@ -7,22 +7,16 @@ from mm_rag.MLM.lvlm import LVLM
 from utils import get_latest_batch_data
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import sys
-import asyncio
-   
 LANCEDB_HOST_FILE = "./shared_data/lancedb"
 TBL_NAME = "test_tbl"
-
 API_BASE = "http://192.168.10.234:11434"
 MODEL_NAME = "llama3.2:latest"
 
-# ใช้ตัวแปรแคชเพื่อเก็บผลลัพธ์ API
 api_cache = {}
-
 def call_api(prompt, max_tokens):
     """ เรียก API และแคชผลลัพธ์เพื่อลดการเรียกซ้ำ """
     cache_key = f"{prompt[:50]}-{max_tokens}"
-    # ลบแคชเก่าหากมีการเปลี่ยนแปลง
+   
     if cache_key in api_cache:
         print(f"🔹 ใช้ค่าจากแคช: {cache_key}")
         return api_cache[cache_key]
@@ -41,7 +35,7 @@ def call_api(prompt, max_tokens):
         json_response = response.json()
         if "choices" in json_response and json_response["choices"]:
             result = json_response["choices"][0]["message"]["content"]
-            api_cache[cache_key] = result  # บันทึกผลลัพธ์ลงแคช
+            api_cache[cache_key] = result 
             return result
         else:
             return "Error: Invalid response from API."
@@ -58,7 +52,7 @@ def batch_data(data, batch_size=10):
 
 def generate_caption(lvlm_module, img):
     """สร้างคำบรรยายสั้น ๆ (Image Caption) สำหรับภาพแต่ละเฟรม"""
-    input_data = {"prompt": "Create the most comprehensive and short description possible for this image.", "image": img}
+    input_data = {"prompt": "Generate the shortest possible caption for this image.", "image": img}
     try:
         return lvlm_module.invoke(input_data).strip()
     except Exception as e:
@@ -67,29 +61,26 @@ def generate_caption(lvlm_module, img):
 
 caption_cache = {}  # แคชสำหรับ caption
 
-# แคช LVLM ในหน่วยความจำ
-if '_lvlm_cache' not in globals():
-    globals()['_lvlm_cache'] = None
-
 def process_batch(batch):
-    """แปลงภาพเป็น Caption ที่สั้นที่สุด แล้วรวมกับ Transcript"""
-    global caption_cache
-
-    # ✅ ใช้ LVLM จากแคช
-    if globals()['_lvlm_cache'] is None:
-        client = PredictionGuardClient()
-        globals()['_lvlm_cache'] = LVLM(client=client)
-        print("✅ สร้าง LVLM Instance ใหม่")
-
-    lvlm_module = globals()['_lvlm_cache']
-
+    """ แปลงภาพเป็น Caption ที่สั้นที่สุด แล้วรวมกับ Transcript """
+    client = PredictionGuardClient()
+    lvlm_module = LVLM(client=client)
     responses = []
+
     for img, transcript in batch:
-        caption = caption_cache.get(img) or generate_caption(lvlm_module, img)
-        caption_cache[img] = caption
+        if img in caption_cache:
+            caption = caption_cache[img]
+        else:
+            caption = generate_caption(lvlm_module, img)
+            if caption:  
+                caption_cache[img] = caption
+
+        if not transcript.strip():
+            transcript = "No transcript available"
 
         combined_text = f"{caption} - {transcript}" if caption else f"- {transcript}"
         responses.append({'image': img, 'captioned_transcript': combined_text})
+        print(combined_text)
 
     return responses
 
@@ -114,22 +105,21 @@ async def summarize_text(text):
     summarization_types = [
         {
             "type": "Narrative Summary",
-            "prompt":f"""Provide a summary that accurately reflects the given text. Use only the information provided, 
-            without adding any extra interpretation, assumptions, or external details.
-            {text}""",
+            "prompt": f"""Tell the story of the text in a clear, engaging, and human-like manner. 
+            Focus on making it easy to understand while capturing the main ideas:\n\n{text}""",
             "max_tokens": 2500
         },
         {
             "type": "5W1H Summary",
-            "prompt": f"Summarize this text using 5W1H format (Who, What, When, Where, Why, How) while strictly following the given content:\n\n{text}",
+            "prompt": f"Summarize this text using 5W1H format:\n\n{text}",
             "max_tokens": 3000
         },
         {
             "type": "Analysis & Insights",
-            "prompt": f"""Provide analysis and insights for the following text based only on the given information:
-            **Risks/Challenges**: Identify potential risks and obstacles strictly from the text.
-            **Feasibility**: Evaluate the likelihood of success or impact using only the available content.
-            **Recommendations**: Provide actionable suggestions derived solely from the provided information.
+            "prompt": f"""Provide analysis and insights for the following text:
+            **Risks/Challenges**: Identify potential risks and obstacles.
+            **Feasibility**: Evaluate the likelihood of success or impact.
+            **Recommendations**: Provide actionable suggestions or alternatives.
             
             {text}""",
             "max_tokens": 2500
@@ -150,6 +140,7 @@ async def summarize_text(text):
 
     await asyncio.gather(*(fetch_summary(summary) for summary in summarization_types))
     return results
+
 
 
 async def async_main():
@@ -186,17 +177,15 @@ async def async_main():
 
     return summary_results
 
+
+
 def main():
     """ ใช้ asyncio.run() เพื่อเรียกใช้ async_main() """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    if loop.is_running():
-        print("🔹 Event loop is already running, using 'create_task' instead.")
-        task = loop.create_task(async_main())
-    else:
-        loop.run_until_complete(async_main())
+    asyncio.run(async_main())
+
+
+if __name__ == "__main__":
+    main()
+
+
 

@@ -36,7 +36,6 @@ You are an AI assistant that answers user queries by analyzing:
 
 ---
 
-
 ### Information Provided:
 
 **Transcript:**  
@@ -82,7 +81,6 @@ def format_prompt(transcript, turns, user_query, state, max_turns):
     """
     สร้าง prompt โดยใช้ max_turns ล่าสุด
     """
-
     if not hasattr(state, "num_turns") or state.num_turns is None:
         state.num_turns = 1  
     else:
@@ -91,7 +89,7 @@ def format_prompt(transcript, turns, user_query, state, max_turns):
         else:
             state.num_turns = max_turns
 
-   
+    # เลือก `num_turns` ล่าสุด
     turns = turns[-state.num_turns:] if turns else []
     formatted_turns = "\n".join([f"{role}: {msg}" for role, msg in turns])
 
@@ -146,15 +144,16 @@ def get_default_rag_chain(state, max_turns=3):
         if not first_frame_path:
             raise ValueError("Image path (extracted_frame_path) is missing in metadata.")
     
-     
+        # ✅ ตัดคำถามปัจจุบันออกไป
         if hasattr(state, "messages") and state.messages:
             recent_turns = state.messages[:-2][-max_turns * 2:]  # ✅ ไม่รวมคำถามปัจจุบัน
         else:
             recent_turns = []
     
+        # ฟอร์แมต turns
         formatted_turns = "\n".join([f"{role}: {msg}" for role, msg in recent_turns])
     
-        
+        # ✅ สร้าง prompt
         prompt = prompt_template.format(
             transcript=combined_transcripts,
             turns=formatted_turns,
@@ -162,13 +161,13 @@ def get_default_rag_chain(state, max_turns=3):
             image_path=first_frame_path 
         )
     
-       
+        # แสดงเฉพาะ turns และ prompt ที่ส่งให้ LVLM
         print(f"Turns sent to LVLM:\n{formatted_turns}")
         print(f"Prompt sent to LVLM:\n{prompt}")
     
         return {
             'prompt': prompt,
-            'image': first_frame_path,  
+            'image': first_frame_path,  # ✅ ใช้ path ของภาพ
             'metadata': filtered_results[0].metadata['metadata'],
             'batch_id': latest_batch_id,
             'turns': formatted_turns
@@ -326,7 +325,9 @@ def get_gradio_instance(state, mm_rag_chain=None):
     )
     return instance
 
+import gradio as gr
 
+# ตั้งค่าพาธของ Static Assets
 gr.set_static_paths(paths=["./assets/"])
 
 # กำหนดธีมของ Gradio
@@ -342,14 +343,15 @@ theme = gr.themes.Base(
         c950="#0f172a"
     ),
 ).set(
-    body_background_fill="#EBEBED", 
+    body_background_fill="#EBEBED",  # เปลี่ยนพื้นหลังเป็นสีเทาอ่อน
     body_background_fill_dark="#EBEBED",
-    body_text_color="#003d70",  
-    border_color_accent="#007ac1", 
-    button_primary_background_fill="#009de0",  
-    button_primary_border_color="#005b99"  
+    body_text_color="#003d70",  # ข้อความเป็นสีฟ้าเข้ม
+    border_color_accent="#007ac1",  # ขอบสีฟ้าสด
+    button_primary_background_fill="#009de0",  # ปุ่มสีฟ้าสด
+    button_primary_border_color="#005b99"  # สีขอบปุ่ม
 )
 
+# กำหนด CSS สำหรับการปรับแต่ง UI
 css = '''
     /* ปุ่มทั่วไป */
     .gr-button, #clear-history-btn, #summarize-btn {
@@ -372,7 +374,6 @@ css = '''
     }
 '''
 
-# ส่วนหัวของ HTML
 html_title = '''
 <table style="width: 100%; border: 0; background-color: #009de0; padding: 10px; border-radius: 8px;">
     <tr style="border: 0;">
@@ -398,11 +399,10 @@ def add_text(state, text, request: gr.Request):
         state.skip_next = True
         return (state, state.to_gradio_chatbot(), "", None) + (no_change_btn,) * 1
     text = text[:1536] 
-    state.append_message("user", text) 
+    state.append_message("user", text)  
     state.append_message("assistant", None)  
     state.skip_next = False
     return (state, state.to_gradio_chatbot(), "", None, disable_btn)
-
 
 
 def http_bot(state, request: gr.Request):
@@ -466,14 +466,14 @@ def get_summary_type_emoji(summary_type):
         "5W1H Summary": "📝",
         "Analysis & Insights": "🔍"
     }
-    return emoji_map.get(summary_type, "❓") 
+    return emoji_map.get(summary_type, "❓")  # ใช้ ❓ หากไม่เจอประเภท
 
 
 def summarize_mode():
     """เรียกใช้ฟังก์ชันสรุปผลและจัดข้อความให้อยู่ใน Markdown"""
     try:
         summary_results = asyncio.run(async_main())
-        formatted_summary = format_summary(summary_results)  
+        formatted_summary = format_summary(summary_results)  # จัดข้อความพร้อมอีโมจิ
         latest_batch_id, video_path = get_latest_batch_data()
         return formatted_summary, video_path
     except Exception as e:
@@ -485,11 +485,9 @@ def format_summary(summary_results):
     """จัดรูปแบบ JSON ผลลัพธ์ในรูป Markdown พร้อมอีโมจิ"""
     formatted_output = ""
     for key, value in summary_results.items():
-        emoji = get_summary_type_emoji(key)  # 
+        emoji = get_summary_type_emoji(key)  # ดึงอีโมจิที่ตรงกับประเภท
         formatted_output += f"{emoji} {key} {emoji}\n\n{value}\n\n"
     return formatted_output
-
-
 
 
 
@@ -508,10 +506,10 @@ def process(mode, query, state):
         return state, response, None 
 
 def get_demo(rag_chain=None):
-    state = gr.State()  
+    state = gr.State()  # สร้าง state ก่อน
     if rag_chain is None:
-        rag_chain = get_default_rag_chain(state)  
-    with gr.Blocks(theme=theme, css=css) as demo: 
+        rag_chain = get_default_rag_chain(state)  # ส่ง state เข้าไป
+    with gr.Blocks(theme=theme, css=css) as demo: #theme=theme, (theme=theme, css=css)
         instance = get_gradio_instance(state, rag_chain)
         state = gr.State(instance)
 
@@ -616,9 +614,9 @@ def get_demo(rag_chain=None):
                         summarize_output = gr.Textbox(
                             label="Summarized Output",
                             visible=True,
-                            lines=15,  
-                            max_lines=30, 
-                            interactive=False,
+                            lines=15,  # จำนวนบรรทัดที่แสดงในกล่อง
+                            max_lines=30,  # จำนวนบรรทัดสูงสุด
+                            interactive=False,  # ทำให้กล่องอ่านได้อย่างเดียว
                             elem_id="summary-output-box"
                         )
 
@@ -644,7 +642,7 @@ def get_demo(rag_chain=None):
                             height=512,
                             visible=True,
                         )
-                    
+                        # ส่วนป้อนคำถามในโหมด Chat
                         with gr.Row(elem_id="query-row") as query_row:
                             textbox = gr.Textbox(
                                 label="Query",
@@ -653,11 +651,11 @@ def get_demo(rag_chain=None):
                             )
                             submit_btn = gr.Button("Send", variant="primary")
                         
-                      
+                        # ✅ แยกปุ่ม Clear History ไว้ด้านล่าง
                         with gr.Row():
                             clear_btn = gr.Button("🗑️ Clear History", elem_id="clear-history-btn", variant="secondary")
                         
-                       
+                    
                         textbox.submit(
                             add_text,
                             [state, textbox],  
@@ -668,7 +666,6 @@ def get_demo(rag_chain=None):
                             [state, chatbot, relevant_image, clear_btn],
                         )
                         
-                        # ✅ ผูกปุ่ม Send กับการส่งข้อความเหมือนเดิม
                         submit_btn.click(
                             add_text,
                             [state, textbox],
@@ -685,16 +682,14 @@ def get_demo(rag_chain=None):
             clear_history, [state], [state, chatbot, textbox, relevant_image, clear_btn]
         )
 
-        # เรียกใช้งาน Summarize Mode เป็นค่าเริ่มต้นเมื่อโหลดหน้า
         demo.load(
-            summarize_mode,  # เรียกใช้ฟังก์ชัน summarize_mode
+            summarize_mode, 
             inputs=[],
-            outputs=[summarize_output, relevant_media],  # ส่งผลลัพธ์ไปยัง Textbox และ Video
+            outputs=[summarize_output, relevant_media], 
         )
 
 
 
     return demo
-
 
 
