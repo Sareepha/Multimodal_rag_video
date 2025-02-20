@@ -574,7 +574,7 @@ def _getPredictionGuardClient():
     return client
 
 
-API_BASE = "http://192.168.10.234:11434"
+API_BASE = "your-api-base"
 try:
     response = requests.get(API_BASE)
     if response.status_code == 200:
